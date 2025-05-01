@@ -1,0 +1,22 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Logged Out - Provider Directory</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center">
+    <div class="bg-white p-8 rounded-lg shadow-md text-center">
+        <h1 class="text-2xl font-bold mb-4">Are you sure you want to log out?</h1>
+        <p class="text-gray-600 mb-6">You will need to log back in to access Provider Directory</p>
+        <form method="POST" action="{{ url_for('auth.logout') }}" class="space-x-4">
+            <button type="submit" class="inline-block bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2">
+                Confirm Logout
+            </button>
+            <a href="/" class="inline-block bg-gray-500 text-white py-2 px-4 rounded-md hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2">
+                Cancel
+            </a>
+        </form>
+    </div>
+</body>
+</html>

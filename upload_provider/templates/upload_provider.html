@@ -1,0 +1,60 @@
+
+{% extends "header.html" %}
+
+{% block content %}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="{{ url_for('upload_provider.static', filename='upload_provider.js') }}"></script>
+<div class="py-8 px-6">
+  <div class="bg-white shadow rounded-lg p-6 max-w-4xl mx-auto">
+    <h1 class="text-2xl font-bold mb-6">Upload Provider Image</h1>
+
+    <!-- Upload form -->
+    <form id="uploadForm" 
+          action="{{ url_for('upload_provider.process_image') }}"
+          method="post"
+          enctype="multipart/form-data"
+          data-create-provider-url="{{ url_for('upload_provider.create_provider') }}"
+          data-provider-detail-url="{{ url_for('providers.provider_detail', provider_id=0) }}"
+          class="space-y-4">
+
+      <input type="file"
+             name="image_file"
+             accept="image/*"
+             required
+             class="block w-full text-sm text-gray-800
+                    file:mr-4 file:py-2 file:px-4
+                    file:rounded file:border-0
+                    file:text-sm file:font-semibold
+                    file:bg-blue-50 file:text-blue-700
+                    hover:file:bg-blue-100"/>
+
+      <button type="submit"
+              class="inline-flex items-center px-4 py-2
+                     bg-blue-600 hover:bg-blue-700
+                     text-white font-semibold rounded-lg">
+        📤 Upload & Extract
+      </button>
+    </form>
+
+    <!-- Processing status -->
+    <div id="processingStatus" class="hidden mt-6 text-center">
+      <div class="animate-spin inline-block w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full"></div>
+      <p class="mt-2 text-gray-600">Processing image...</p>
+    </div>
+
+    <!-- Extraction results -->
+    <div id="extractionResults" class="hidden mt-6">
+      <h2 class="text-xl font-semibold mb-2">Extracted Text</h2>
+      <div id="markdownContent" class="prose max-w-none bg-gray-50 border rounded p-4 overflow-x-auto">
+      </div>
+    </div>
+
+    <div class="mt-8 pt-4 border-t">
+      <a href="{{ url_for('providers.providers') }}"
+         class="text-blue-600 hover:text-blue-800">
+        ← Back to Provider List
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}

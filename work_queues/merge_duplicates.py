@@ -1,0 +1,3 @@
+# This function will be called to merge two providers flagged as possible duplicates on a work queue item record.  It will take the work queue item ID as a parameter, then pick the first record as the primary record.
+
+# The other records flagged as duplicates, first we will move all of the REL_provider_group records to the primary record, then we will move all of the REL_provider_network records to the primary record, then we will delete the duplicate records.

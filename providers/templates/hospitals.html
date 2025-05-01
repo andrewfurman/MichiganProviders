@@ -1,0 +1,37 @@
+
+{% extends "header.html" %}
+
+{% block content %}
+<div class="py-8" style="padding-left: 20px; padding-right: 20px;">
+    <div class="w-full overflow-x-auto bg-white rounded-lg shadow">
+        <table class="min-w-full table-auto">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hospital ID</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">CCN</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Address</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">City</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">State</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ZIP</th>
+                </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+                {% for hospital in hospitals %}
+                <tr class="hover:bg-gray-50">
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ hospital.hospital_id }}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600">
+                        <a href="{{ url_for('providers.hospital_detail', hospital_id=hospital.hospital_id) }}" class="hover:underline">{{ hospital.name }}</a>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ hospital.ccn }}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ hospital.address_line }}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ hospital.city }}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ hospital.state }}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ hospital.zip }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,90 @@
+
+{% extends "header.html" %}
+
+{% block content %}
+<div class="py-8" style="padding-left: 20px; padding-right: 20px;">
+    <div class="bg-white rounded-lg shadow p-6 max-w-5xl mx-auto">
+        <form id="hospitalForm" method="POST" action="{{ url_for('providers.update_hospital', hospital_id=hospital.hospital_id) }}">
+            <!-- Header Section -->
+            <div class="border-b pb-4 mb-6">
+                <p class="text-sm text-blue-600 mb-1">Hospital Record</p>
+                <div class="flex justify-between items-center">
+                    <h1 class="text-3xl font-bold">{{ hospital.name }}</h1>
+                    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">💾 Save</button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-6">
+                <!-- Hospital Information -->
+                <div class="col-span-2 sm:col-span-1">
+                    <h2 class="text-lg font-semibold mb-4 text-gray-700">Hospital Information</h2>
+                    <div class="space-y-3">
+                        <div>
+                            <label class="text-gray-600 text-sm">Name</label>
+                            <input type="text" name="name" value="{{ hospital.name }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+                        </div>
+                        <div>
+                            <label class="text-gray-600 text-sm">CCN</label>
+                            <input type="text" name="ccn" value="{{ hospital.ccn }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Contact Information -->
+                <div class="col-span-2 sm:col-span-1">
+                    <h2 class="text-lg font-semibold mb-4 text-gray-700">Contact Information</h2>
+                    <div class="space-y-3">
+                        <div>
+                            <label class="text-gray-600 text-sm">Address</label>
+                            <input type="text" name="address_line" value="{{ hospital.address_line }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+                        </div>
+                        <div>
+                            <label class="text-gray-600 text-sm">City</label>
+                            <input type="text" name="city" value="{{ hospital.city }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+                        </div>
+                        <div>
+                            <label class="text-gray-600 text-sm">State</label>
+                            <input type="text" name="state" value="{{ hospital.state }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+                        </div>
+                        <div>
+                            <label class="text-gray-600 text-sm">ZIP</label>
+                            <input type="text" name="zip" value="{{ hospital.zip }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </form>
+
+        <!-- Networks Section -->
+        <div class="mt-8 pt-4 border-t">
+            <h2 class="text-lg font-semibold mb-4 text-gray-700">Network Affiliations</h2>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Network Code</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Network Name</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Effective Date</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        {% for network, rel in networks %}
+                        <tr>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ network.code }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ network.name }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ rel.effective_date }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ rel.status }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="mt-8 pt-4 border-t">
+            <a href="{{ url_for('providers.hospitals') }}" class="text-blue-600 hover:text-blue-800">← Back to Hospital List</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

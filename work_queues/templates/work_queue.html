@@ -1,0 +1,89 @@
+
+{% extends "header.html" %}
+
+{% block content %}
+<div class="py-8 px-5">
+  <div class="flex justify-between items-center mb-6">
+    <h2 class="text-2xl font-bold">Work Queue</h2>
+    <div class="flex space-x-2">
+      <select id="statusFilter" class="border rounded px-3 py-1">
+        <option value="">All Statuses</option>
+        <option value="open">Open</option>
+        <option value="in_progress">In Progress</option>
+        <option value="resolved">Resolved</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="bg-white shadow rounded-lg overflow-hidden">
+    <table class="min-w-full table-auto">
+      <thead class="bg-gray-50">
+        <tr class="text-xs font-medium text-gray-500 uppercase tracking-wider">
+          <th class="px-6 py-3 text-left">Provider</th>
+          <th class="px-6 py-3 text-left">Issue Type</th>
+          <th class="px-6 py-3 text-left">Description</th>
+          <th class="px-6 py-3 text-left">Status</th>
+          <th class="px-6 py-3 text-left">Assigned To</th>
+          <th class="px-6 py-3 text-left">Last Updated</th>
+        </tr>
+      </thead>
+      <tbody class="bg-white divide-y divide-gray-200">
+        {% for item in items %}
+        <tr class="hover:bg-gray-50">
+          <td class="px-6 py-4">
+            <a href="{{ url_for('work_queue.work_queue_item', queue_id=item.queue_id) }}" 
+               class="text-blue-600 hover:text-blue-800 hover:underline">
+              {{ item.provider.first_name }} {{ item.provider.last_name }}
+            </a>
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap">
+            <span class="text-sm">{{ item.issue_type.replace('_', ' ').title() }}</span>
+          </td>
+          <td class="px-6 py-4">
+            <span class="text-sm text-gray-900">{{ item.description[:100] }}{% if item.description|length > 100 %}...{% endif %}</span>
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap">
+            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full
+              {% if item.status == 'open' %}bg-red-100 text-red-800
+              {% elif item.status == 'in_progress' %}bg-yellow-100 text-yellow-800
+              {% else %}bg-green-100 text-green-800{% endif %}">
+              {{ item.status.replace('_', ' ').title() }}
+            </span>
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+            {{ item.assigned_user.email if item.assigned_user else '—' }}
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+            {{ item.updated_at.strftime('%Y-%m-%d %H:%M') }}
+          </td>
+        </tr>
+        {% endfor %}
+        {% if not items %}
+        <tr>
+          <td colspan="6" class="px-6 py-4 text-center text-gray-500">
+            No work queue items found
+          </td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+document.getElementById('statusFilter').addEventListener('change', function(e) {
+  const status = e.target.value;
+  const rows = document.querySelectorAll('tbody tr');
+  
+  rows.forEach(row => {
+    const statusCell = row.querySelector('td:nth-child(4)');
+    if (!status || !statusCell) {
+      row.style.display = '';
+      return;
+    }
+    const statusText = statusCell.textContent.trim().toLowerCase();
+    row.style.display = statusText.includes(status) ? '' : 'none';
+  });
+});
+</script>
+{% endblock %}
