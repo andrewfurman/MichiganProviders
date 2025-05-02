@@ -9,7 +9,6 @@ wq_bp = Blueprint("work_queue", __name__,
                   static_folder="static")
 
 @wq_bp.route("/work_queue")
-@login_required
 def work_queue():
     items = WorkQueueItem.query.order_by(
         WorkQueueItem.status.desc(),  # open first
@@ -18,7 +17,6 @@ def work_queue():
     return render_template("work_queue.html", items=items)
 
 @wq_bp.route("/work_queue/<int:queue_id>")
-@login_required
 def work_queue_item(queue_id):
     item = WorkQueueItem.query.get_or_404(queue_id)
     provider = item.provider
@@ -27,7 +25,6 @@ def work_queue_item(queue_id):
                          item=item, provider=provider, users=users)
 
 @wq_bp.route("/work_queue/<int:queue_id>/update", methods=['POST'])
-@login_required
 def update_work_queue_item(queue_id):
     item = WorkQueueItem.query.get_or_404(queue_id)
 
@@ -45,7 +42,6 @@ def update_work_queue_item(queue_id):
     return redirect(url_for("work_queue.work_queue_item", queue_id=queue_id))
 
 @wq_bp.route("/work_queue/<int:queue_id>/assign_to_me", methods=['POST'])
-@login_required
 def assign_to_me(queue_id):
     item = WorkQueueItem.query.get_or_404(queue_id)
     item.assigned_user_id = current_user.id

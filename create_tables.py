@@ -1,169 +1,65 @@
-import os
-import psycopg2
-from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+"""
+create_tables.py
+─────────────────────────────────────────────────────────────────────────────
+• Verifies the app can connect to the PostgreSQL database
+• Imports every model so SQLAlchemy’s metadata is fully populated
+• Creates (or upgrades) all tables in the database
+Run:  python create_tables.py
+─────────────────────────────────────────────────────────────────────────────
+"""
 
-def create_tables():
-    database_url = os.environ['DATABASE_URL']
+import logging
+from sqlalchemy import text
+from main import app, db           # re-use the Flask app & SQLAlchemy instance
 
-    conn = psycopg2.connect(database_url)
-    conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-    cur = conn.cursor()
+# ────────────────────────────────────────────────────────────────────────────
+# 1.  Verify DB connectivity
+# ────────────────────────────────────────────────────────────────────────────
+def verify_db_connection() -> None:
+    """
+    Executes a simple SELECT 1 to confirm that the DATABASE_URL in main.py
+    is valid and the server is reachable.
+    """
+    with app.app_context():
+        try:
+            db.session.execute(text("SELECT 1"))
+            print("✅  Database connection established")
+        except Exception as exc:        # pylint: disable=broad-except
+            print("❌  Failed to connect to database:", exc)
+            raise                      # Surface the error so CI/CD fails
 
-    try:
-        # Create users table
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                email VARCHAR(255) UNIQUE NOT NULL,
-                first_name VARCHAR(120),
-                last_name VARCHAR(120),
-                role VARCHAR(50)
-            )
-        """)
 
-        # Create core tables
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS individual_providers (
-                provider_id SERIAL PRIMARY KEY,
-                npi TEXT NOT NULL,
-                first_name TEXT NOT NULL,
-                last_name TEXT NOT NULL,
-                gender TEXT,
-                phone TEXT,
-                provider_type TEXT,
-                accepting_new_patients BOOLEAN,
-                specialties TEXT,
-                board_certifications TEXT,
-                languages TEXT,
-                address_line TEXT,
-                city TEXT,
-                state TEXT,
-                zip TEXT
-            )
-        """)
+# ────────────────────────────────────────────────────────────────────────────
+# 2.  Import every model so they’re registered with SQLAlchemy
+#     (models/__init__.py already imports each sub-module)
+# ────────────────────────────────────────────────────────────────────────────
+def import_all_models() -> None:
+    """
+    Importing `models` triggers its __init__.py, which in turn imports every
+    model module (provider, hospital, etc.).  That ensures all tables are
+    present in SQLAlchemy’s metadata before we call `create_all()`.
+    """
+    import models  # noqa: F401  pylint: disable=import-outside-toplevel,unused-import
 
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS individual_provider_audit (
-                audit_id SERIAL PRIMARY KEY,
-                provider_id INTEGER,
-                field_updated TEXT NOT NULL,
-                old_value TEXT,
-                new_value TEXT,
-                change_description TEXT,
-                edit_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                user_id INTEGER,
-                FOREIGN KEY (provider_id) REFERENCES individual_providers(provider_id) ON DELETE CASCADE,
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-            )
-        """)
 
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS medical_groups (
-                group_id SERIAL PRIMARY KEY,
-                name TEXT NOT NULL,
-                tax_id TEXT,
-                address_line TEXT,
-                city TEXT,
-                state TEXT,
-                zip TEXT
-            )
-        """)
+# ────────────────────────────────────────────────────────────────────────────
+# 3.  Create every table defined in metadata
+# ────────────────────────────────────────────────────────────────────────────
+def create_all_tables() -> None:
+    """Creates tables if they don’t exist; no-ops if they’re already present."""
+    with app.app_context():
+        db.create_all()
+        print("🗄️  All tables created (or already existed)")
 
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS hospitals (
-                hospital_id SERIAL PRIMARY KEY,
-                name TEXT NOT NULL,
-                ccn TEXT,
-                address_line TEXT,
-                city TEXT,
-                state TEXT,
-                zip TEXT
-            )
-        """)
 
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS networks (
-                network_id SERIAL PRIMARY KEY,
-                code TEXT NOT NULL,
-                name TEXT NOT NULL
-            )
-        """)
-
-        # Create relationship tables
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS individual_provider_medical_group (
-                id SERIAL PRIMARY KEY,
-                provider_id INTEGER REFERENCES individual_providers(provider_id),
-                group_id INTEGER REFERENCES medical_groups(group_id),
-                start_date DATE,
-                end_date DATE,
-                primary_flag BOOLEAN,
-                UNIQUE(provider_id, group_id)
-            )
-        """)
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS medical_group_hospital (
-                id SERIAL PRIMARY KEY,
-                group_id INTEGER REFERENCES medical_groups(group_id),
-                hospital_id INTEGER REFERENCES hospitals(hospital_id),
-                privilege_type TEXT,
-                UNIQUE(group_id, hospital_id)
-            )
-        """)
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS hospital_network (
-                id SERIAL PRIMARY KEY,
-                hospital_id INTEGER REFERENCES hospitals(hospital_id),
-                network_id INTEGER REFERENCES networks(network_id),
-                effective_date DATE,
-                status TEXT,
-                UNIQUE(hospital_id, network_id)
-            )
-        """)
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS medical_group_network (
-                id SERIAL PRIMARY KEY,
-                group_id INTEGER REFERENCES medical_groups(group_id),
-                network_id INTEGER REFERENCES networks(network_id),
-                effective_date DATE,
-                status TEXT,
-                UNIQUE(group_id, network_id)
-            )
-        """)
-
-        # Create work queue table
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS work_queue_items (
-                queue_id SERIAL PRIMARY KEY,
-                provider_id INTEGER NOT NULL
-                    REFERENCES individual_providers(provider_id) ON DELETE CASCADE,
-                issue_type TEXT NOT NULL,
-                description TEXT NOT NULL,
-                action_type VARCHAR(20) NOT NULL DEFAULT 'update_field',
-                field_name TEXT,
-                new_value TEXT,
-                duplicate_ids INTEGER[],
-                recommended_action TEXT,
-                status TEXT NOT NULL DEFAULT 'open',
-                assigned_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                resolved_at TIMESTAMP
-            )
-        """)
-
-        print("All tables created successfully!")
-
-    except Exception as e:
-        print(f"An error occurred: {e}")
-
-    finally:
-        cur.close()
-        conn.close()
-
+# ────────────────────────────────────────────────────────────────────────────
+# Entrypoint
+# ────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    create_tables()
+    logging.basicConfig(
+        level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s"
+    )
+
+    verify_db_connection()
+    import_all_models()
+    create_all_tables()

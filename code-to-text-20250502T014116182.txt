@@ -1,0 +1,655 @@
+### FILE TREE (SELECTED)
+
+├─ insert_records
+|  ├─ insert_networks.py (28 lines)
+├─ models
+|  ├─ work_queue.py (56 lines)
+|  ├─ provider.py (48 lines)
+|  ├─ __init__.py (28 lines)
+|  ├─ provider_audit.py (24 lines)
+|  ├─ hospital.py (14 lines)
+|  ├─ medical_group.py (14 lines)
+|  ├─ REL_provider_group.py (13 lines)
+|  ├─ auth.py (13 lines)
+|  ├─ REL_group_network.py (12 lines)
+|  ├─ REL_hospital_network.py (12 lines)
+|  ├─ REL_group_hospital.py (11 lines)
+|  └─ network.py (9 lines)
+|  ├─ db.py (1 lines)
+├─ providers
+|  ├─ providers_routes.py (92 lines)
+├─ main.py (80 lines)
+├─ create_tables.py (65 lines)
+├─ pyproject.toml (32 lines)
+├─ .replit (18 lines)
+
+
+### FILE CONTENTS
+
+FILE: insert_records/insert_networks.py
+----------------------------------------
+# insert_networks.py
+
+# This script will insert networks into the network table and create the codes and names for each network based on the specified list below.
+
+# Category Prefix	Network Code	Network Name
+# HS (Hospital-Specific)	HS-AGCC	Ascension Genesys ConnectedCare Network
+#   HS-HFHSCC	Henry Ford Health System ConnectedCare Network
+#   HS-HBN12	Hospital Blue Networks (Tier 1 & 2)
+#   HS-THN	Trinity Health Network
+#   HS-UMPC	U-M Premier Care (HMO) Network
+# EG (Employer-Group Only)	EG-BCBSMT	BCBSM Traditional Network
+#   EG-BHPN	Blue High Performance Network
+#   EG-BPPL	Blue Preferred / Blue Preferred Plus Network
+#   EG-BPPOSWI	Blue Preferred POS Network (WI)
+#   EG-MEIPPO	Meijer PPO Network
+#   EG-MEIBHPN	Meijer BlueHPN Network
+#   EG-MEIBPPOS	Meijer Blue Preferred POS Network
+# MS (Multi-Segment)	MS-BCBSMPPO	BCBSM PPO TRUST Network
+#   MS-BCNHMO	BCN HMO (Commercial) Network
+#   MS-PCPF	PCP Focus (HMO) Network
+#   MS-BCMDHMO	Blue Cross Metro Detroit HMO Network
+#   MS-BCLHMO	Blue Cross Local HMO Network
+# MA (Medicare Advantage)	MA-BCBSMPPO	BCBSM Medicare Advantage PPO Network (“Medicare Plus Blue”)
+#   MA-BCNAHPOS	BCN Advantage HMO-POS Network
+#   MA-BCNACV	BCN Advantage Community Value Network
+#   MA-BCNAHCC	BCN Advantage HMO ConnectedCare Network
+#   MA-BCNALHMO	BCN Advantage Local HMO Network
+# MD (Medicaid)	MD-BCC	Blue Cross Complete Network
+
+FILE: models/work_queue.py
+----------------------------------------
+
+from datetime import datetime
+from sqlalchemy.dialects.postgresql import ARRAY
+from .db import db
+
+class WorkQueueItem(db.Model):
+    __tablename__ = "work_queue_items"
+
+    # Core identity
+    queue_id = db.Column(db.Integer, primary_key=True)
+    provider_id = db.Column(db.Integer,
+                          db.ForeignKey("individual_providers.provider_id",
+                                       ondelete="CASCADE"),
+                          nullable=False)
+
+    # Problem description
+    issue_type = db.Column(db.String(40), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+
+    # Structured recommendation
+    action_type = db.Column(db.String(20), nullable=False, 
+                          default="update_field")
+    field_name = db.Column(db.Text)
+    new_value = db.Column(db.Text)
+    duplicate_ids = db.Column(ARRAY(db.Integer))
+
+    # Free-text recommendation
+    recommended_action = db.Column(db.Text)
+
+    # Workflow/assignment
+    status = db.Column(db.String(20), default="open", nullable=False)
+    assigned_user_id = db.Column(db.Integer,
+                                db.ForeignKey("users.id",
+                                             ondelete="SET NULL"))
+    created_by_user_id = db.Column(db.Integer,
+                                  db.ForeignKey("users.id",
+                                              ondelete="SET NULL"))
+    created_at = db.Column(db.DateTime,
+                          nullable=False,
+                          default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime,
+                          nullable=False, 
+                          default=datetime.utcnow,
+                          onupdate=datetime.utcnow)
+    resolved_at = db.Column(db.DateTime)
+
+    # Relationships
+    provider = db.relationship("IndividualProvider")
+    assigned_user = db.relationship("User",
+                                  foreign_keys=[assigned_user_id])
+    created_by_user = db.relationship("User",
+                                    foreign_keys=[created_by_user_id])
+
+    def is_duplicate_merge(self) -> bool:
+        return self.action_type == "merge_duplicates"
+
+
+FILE: models/provider.py
+----------------------------------------
+from .db import db
+
+class IndividualProvider(db.Model):
+    __tablename__ = 'individual_providers'
+
+    provider_id = db.Column(db.Integer, primary_key=True)
+    npi = db.Column(db.Text, nullable=False)
+    first_name = db.Column(db.Text, nullable=False)
+    last_name = db.Column(db.Text, nullable=False)
+    gender = db.Column(db.Text)
+    phone = db.Column(db.Text)
+    provider_type = db.Column(db.Text)
+    accepting_new_patients = db.Column(db.Boolean)
+    specialties = db.Column(db.Text)
+    board_certifications = db.Column(db.Text)
+    languages = db.Column(db.Text)
+    address_line = db.Column(db.Text)
+    city = db.Column(db.Text)
+    state = db.Column(db.Text)
+    zip = db.Column(db.Text)
+    provider_enrollment_form_image = db.Column(db.LargeBinary)  # BYTEA in PostgreSQL
+    provider_enrollment_form_markdown_text = db.Column(db.Text)
+    provider_enrollment_form_json = db.Column(db.JSON)  # JSONB in PostgreSQL
+    provider_facets_tables = db.Column(db.JSON)  # JSONB in PostgreSQL
+    provider_facets_markdown = db.Column(db.Text)
+
+    def to_dict(self):
+        """
+        Convert IndividualProvider object to dictionary
+        Useful for JSON serialization
+        """
+        return {
+            'provider_id': self.provider_id,
+            'npi': self.npi,
+            'first_name': self.first_name,
+            'last_name': self.last_name,
+            'gender': self.gender,
+            'phone': self.phone,
+            'provider_type': self.provider_type,
+            'accepting_new_patients': self.accepting_new_patients,
+            'specialties': self.specialties,
+            'board_certifications': self.board_certifications,
+            'languages': self.languages,
+            'address_line': self.address_line,
+            'city': self.city,
+            'state': self.state,
+            'zip': self.zip
+        }
+
+FILE: models/__init__.py
+----------------------------------------
+
+from .db import db
+from .auth import User
+from .provider import IndividualProvider
+from .provider_audit import ProviderAudit
+from .work_queue import WorkQueueItem
+from .medical_group import MedicalGroup
+from .hospital import Hospital 
+from .network import Network
+from .REL_provider_group import ProviderGroup
+from .REL_group_hospital import GroupHospital
+from .REL_hospital_network import HospitalNetwork
+from .REL_group_network import GroupNetwork
+
+__all__ = [
+    'db',
+    'User',
+    'IndividualProvider',
+    'ProviderAudit',
+    'MedicalGroup',
+    'Hospital',
+    'Network',
+    'ProviderGroup',
+    'GroupHospital', 
+    'HospitalNetwork',
+    'GroupNetwork'
+]
+
+
+FILE: models/provider_audit.py
+----------------------------------------
+
+from .db import db
+from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
+
+class ProviderAudit(db.Model):
+    """Audit log for provider changes"""
+    __tablename__ = 'individual_provider_audit'
+    
+    audit_id = db.Column(db.Integer, primary_key=True)
+    provider_id = db.Column(db.Integer, db.ForeignKey('individual_providers.provider_id', ondelete='CASCADE'))
+    field_updated = db.Column(db.Text, nullable=False)
+    old_value = db.Column(db.Text)
+    new_value = db.Column(db.Text)
+    change_description = db.Column(db.Text)
+    edit_time = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'))
+
+    # Relationships
+    provider = db.relationship('IndividualProvider', backref=db.backref('audits', lazy='dynamic'))
+    user = db.relationship('User', foreign_keys=[user_id])
+
+
+FILE: models/hospital.py
+----------------------------------------
+
+from . import db
+
+class Hospital(db.Model):
+    __tablename__ = 'hospitals'
+    
+    hospital_id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String, nullable=False)
+    ccn = db.Column(db.String)
+    address_line = db.Column(db.String)
+    city = db.Column(db.String)
+    state = db.Column(db.String)
+    zip = db.Column(db.String)
+
+
+FILE: models/medical_group.py
+----------------------------------------
+
+from . import db
+
+class MedicalGroup(db.Model):
+    __tablename__ = 'medical_groups'
+    
+    group_id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String, nullable=False)
+    tax_id = db.Column(db.String)
+    address_line = db.Column(db.String)
+    city = db.Column(db.String)
+    state = db.Column(db.String)
+    zip = db.Column(db.String)
+
+
+FILE: models/REL_provider_group.py
+----------------------------------------
+
+from . import db
+
+class ProviderGroup(db.Model):
+    __tablename__ = 'individual_provider_medical_group'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    provider_id = db.Column(db.Integer, db.ForeignKey('individual_providers.provider_id'))
+    group_id = db.Column(db.Integer, db.ForeignKey('medical_groups.group_id'))
+    start_date = db.Column(db.Date)
+    end_date = db.Column(db.Date)
+    primary_flag = db.Column(db.Boolean)
+
+
+FILE: models/auth.py
+----------------------------------------
+
+from main import db
+from flask_login import UserMixin
+
+class User(db.Model, UserMixin):
+    __tablename__ = 'users'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(255), unique=True, nullable=False)
+    first_name = db.Column(db.String(120))
+    last_name = db.Column(db.String(120))
+    role = db.Column(db.String(50))
+
+
+FILE: models/REL_group_network.py
+----------------------------------------
+
+from . import db
+
+class GroupNetwork(db.Model):
+    __tablename__ = 'medical_group_network'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    group_id = db.Column(db.Integer, db.ForeignKey('medical_groups.group_id'))
+    network_id = db.Column(db.Integer, db.ForeignKey('networks.network_id'))
+    effective_date = db.Column(db.Date)
+    status = db.Column(db.String)
+
+
+FILE: models/REL_hospital_network.py
+----------------------------------------
+
+from . import db
+
+class HospitalNetwork(db.Model):
+    __tablename__ = 'hospital_network'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    hospital_id = db.Column(db.Integer, db.ForeignKey('hospitals.hospital_id'))
+    network_id = db.Column(db.Integer, db.ForeignKey('networks.network_id'))
+    effective_date = db.Column(db.Date)
+    status = db.Column(db.String)
+
+
+FILE: models/REL_group_hospital.py
+----------------------------------------
+
+from . import db
+
+class GroupHospital(db.Model):
+    __tablename__ = 'medical_group_hospital'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    group_id = db.Column(db.Integer, db.ForeignKey('medical_groups.group_id'))
+    hospital_id = db.Column(db.Integer, db.ForeignKey('hospitals.hospital_id'))
+    privilege_type = db.Column(db.String)
+
+
+FILE: models/network.py
+----------------------------------------
+# Models/network.py
+from . import db
+
+class Network(db.Model):
+    __tablename__ = 'networks'
+    
+    network_id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String, nullable=False)
+    name = db.Column(db.String, nullable=False)
+
+FILE: models/db.py
+----------------------------------------
+from main import db        # now no second instance!
+
+FILE: providers/providers_routes.py
+----------------------------------------
+from flask import Blueprint, render_template, abort, request, redirect, url_for, flash, current_app
+from main import db
+from models import IndividualProvider, MedicalGroup, Hospital, Network, ProviderGroup, HospitalNetwork
+
+
+providers_bp = Blueprint('providers', __name__, 
+                        template_folder='templates',
+                        static_folder='static',
+                        static_url_path='/providers/static')
+
+@providers_bp.route('/individual_providers/<int:provider_id>')
+def provider_detail(provider_id):
+    provider = db.session.query(IndividualProvider).get(provider_id)
+    if provider is None:
+        abort(404)
+
+    medical_groups = db.session.query(MedicalGroup)\
+        .join(ProviderGroup, ProviderGroup.group_id == MedicalGroup.group_id)\
+        .filter(ProviderGroup.provider_id == provider_id)\
+        .all()
+
+    return render_template('individual_provider_detail.html', provider=provider, medical_groups=medical_groups)
+
+@providers_bp.route('/individual_providers/<int:provider_id>/update', methods=['POST'])
+def update_provider(provider_id):
+    from providers.individual_provider_update import update_individual_provider
+    return update_individual_provider(provider_id)
+
+@providers_bp.route('/medical_groups')
+def medical_groups():
+    groups = db.session.query(MedicalGroup).order_by(MedicalGroup.group_id).all()
+    return render_template('medical_groups.html', medical_groups=groups)
+
+@providers_bp.route('/individual_providers')
+def providers():
+    providers = db.session.query(IndividualProvider).all()
+    return render_template('individual_providers.html', providers=providers)
+
+@providers_bp.route('/individual_providers/<int:provider_id>/delete', methods=['POST'])
+def delete_provider(provider_id):
+    provider = db.session.query(IndividualProvider).get(provider_id)
+    if provider is None:
+        abort(404)
+
+    # First delete all provider group relationships
+    db.session.query(ProviderGroup).filter(ProviderGroup.provider_id == provider_id).delete()
+    
+    # Then delete the provider
+    db.session.delete(provider)
+    db.session.commit()
+    flash('Provider deleted successfully', 'success')
+    return redirect(url_for('providers.providers'))
+
+@providers_bp.route('/networks')
+def networks():
+    networks = db.session.query(Network).order_by(Network.network_id).all()
+    return render_template('networks.html', networks=networks)
+
+@providers_bp.route('/hospitals')
+def hospitals():
+    hospitals = db.session.query(Hospital).order_by(Hospital.hospital_id).all()
+    return render_template('hospitals.html', hospitals=hospitals)
+
+@providers_bp.route('/hospitals/<int:hospital_id>')
+def hospital_detail(hospital_id):
+    hospital = db.session.query(Hospital).get(hospital_id)
+    if hospital is None:
+        abort(404)
+    
+    networks = db.session.query(Network, HospitalNetwork)\
+        .join(HospitalNetwork, Network.network_id == HospitalNetwork.network_id)\
+        .filter(HospitalNetwork.hospital_id == hospital_id)\
+        .all()
+        
+    return render_template('hospital_detail.html', hospital=hospital, networks=networks)
+
+@providers_bp.route('/hospitals/<int:hospital_id>/update', methods=['POST'])
+def update_hospital(hospital_id):
+    hospital = db.session.query(Hospital).get(hospital_id)
+    if hospital is None:
+        abort(404)
+        
+    hospital.name = request.form.get('name')
+    hospital.ccn = request.form.get('ccn')
+    hospital.address_line = request.form.get('address_line')
+    hospital.city = request.form.get('city')
+    hospital.state = request.form.get('state')
+    hospital.zip = request.form.get('zip')
+    
+    db.session.commit()
+    flash('Hospital updated successfully', 'success')
+    return redirect(url_for('providers.hospital_detail', hospital_id=hospital_id))
+
+FILE: main.py
+----------------------------------------
+from flask import Flask, redirect, url_for
+from flask_sqlalchemy import SQLAlchemy
+from flask_mail import Mail
+from flask_login import LoginManager
+from itsdangerous import URLSafeTimedSerializer
+import os
+
+# Initialize extensions
+db = SQLAlchemy()
+mail = Mail()
+login_mgr = LoginManager()
+
+app = Flask(__name__)
+
+# ────────────────────────────────────────────────────────────────
+# Core configuration
+# ────────────────────────────────────────────────────────────────
+# Database
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ["DATABASE_URL"]
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    'pool_pre_ping': True,
+    'pool_recycle': 300,  # Recycle connections every 5 minutes
+    'pool_timeout': 30,   # Connection timeout of 30 seconds
+    'pool_size': 10       # Maximum pool size
+}
+
+# Secrets ─── raise early if they're missing
+try:
+    app.config["FLASK_SECRET_KEY"] = os.environ["FLASK_SECRET_KEY"]
+    app.config["SECURITY_TOKEN_SALT"] = os.environ["SECURITY_TOKEN_SALT"]
+except KeyError as missing:
+    raise ValueError(f"Required environment variable {missing} is not set")
+
+# `app.secret_key` writes to app.config["SECRET_KEY"]; keep both for clarity
+app.secret_key = app.config["FLASK_SECRET_KEY"]
+
+# Mail (optional—but convenient to load here)
+app.config["MAIL_SERVER"] = os.environ.get("MAIL_SERVER", "smtp.gmail.com")
+app.config["MAIL_PORT"] = int(os.environ.get("MAIL_PORT", "587"))
+app.config["MAIL_USE_TLS"] = os.environ.get("MAIL_USE_TLS", "true").lower() == "true"
+app.config["MAIL_USERNAME"] = os.environ.get("MAIL_USERNAME")
+app.config["MAIL_PASSWORD"] = os.environ.get("MAIL_PASSWORD")
+app.config["MAIL_DEFAULT_SENDER"] = os.environ.get(
+    "EMAILS_SENT_FROM", app.config["MAIL_USERNAME"]
+)
+
+# Initialize extensions with app
+db.init_app(app)
+mail.init_app(app)
+login_mgr.init_app(app)
+
+# Create URL safe serializer
+ts = URLSafeTimedSerializer(
+    secret_key=app.config["FLASK_SECRET_KEY"],
+    salt=app.config["SECURITY_TOKEN_SALT"]
+)
+
+# ────────────────────────────────────────────────────────────────
+# Blueprints & routes
+# ────────────────────────────────────────────────────────────────
+from providers.providers_routes import providers_bp
+from auth import bp as auth_bp
+from work_queues.work_queue_routes import wq_bp
+from upload_provider.upload_provider_routes import upload_provider_bp
+
+app.register_blueprint(auth_bp, url_prefix="/auth")
+app.register_blueprint(providers_bp)
+app.register_blueprint(wq_bp)
+app.register_blueprint(upload_provider_bp)
+
+@app.route("/")
+def index():
+    return redirect(url_for("upload_provider.upload"))
+
+# ────────────────────────────────────────────────────────────────
+# Entrypoint
+# ────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
+
+FILE: create_tables.py
+----------------------------------------
+"""
+create_tables.py
+─────────────────────────────────────────────────────────────────────────────
+• Verifies the app can connect to the PostgreSQL database
+• Imports every model so SQLAlchemy’s metadata is fully populated
+• Creates (or upgrades) all tables in the database
+Run:  python create_tables.py
+─────────────────────────────────────────────────────────────────────────────
+"""
+
+import logging
+from sqlalchemy import text
+from main import app, db           # re-use the Flask app & SQLAlchemy instance
+
+# ────────────────────────────────────────────────────────────────────────────
+# 1.  Verify DB connectivity
+# ────────────────────────────────────────────────────────────────────────────
+def verify_db_connection() -> None:
+    """
+    Executes a simple SELECT 1 to confirm that the DATABASE_URL in main.py
+    is valid and the server is reachable.
+    """
+    with app.app_context():
+        try:
+            db.session.execute(text("SELECT 1"))
+            print("✅  Database connection established")
+        except Exception as exc:        # pylint: disable=broad-except
+            print("❌  Failed to connect to database:", exc)
+            raise                      # Surface the error so CI/CD fails
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 2.  Import every model so they’re registered with SQLAlchemy
+#     (models/__init__.py already imports each sub-module)
+# ────────────────────────────────────────────────────────────────────────────
+def import_all_models() -> None:
+    """
+    Importing `models` triggers its __init__.py, which in turn imports every
+    model module (provider, hospital, etc.).  That ensures all tables are
+    present in SQLAlchemy’s metadata before we call `create_all()`.
+    """
+    import models  # noqa: F401  pylint: disable=import-outside-toplevel,unused-import
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 3.  Create every table defined in metadata
+# ────────────────────────────────────────────────────────────────────────────
+def create_all_tables() -> None:
+    """Creates tables if they don’t exist; no-ops if they’re already present."""
+    with app.app_context():
+        db.create_all()
+        print("🗄️  All tables created (or already existed)")
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Entrypoint
+# ────────────────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s"
+    )
+
+    verify_db_connection()
+    import_all_models()
+    create_all_tables()
+
+FILE: pyproject.toml
+----------------------------------------
+[tool.poetry]
+name = "python-template"
+version = "0.1.0"
+description = ""
+authors = ["Your Name <you@example.com>"]
+
+[tool.poetry.dependencies]
+python = ">=3.11.0,<3.12"
+flask = "^3.0.0"
+gunicorn = "^21.2.0"
+networks = "^0.3.7"
+flask-sqlalchemy = "^3.1.1"
+flask-mail = "^0.10.0"
+flask-login = "^0.6.3"
+itsdangerous = "^2.2.0"
+sqlalchemy = "^2.0.40"
+openai = "^1.12.0"
+psycopg2-binary = "^2.9.10"
+
+[tool.pyright]
+# https://github.com/microsoft/pyright/blob/main/docs/configuration.md
+useLibraryCodeForTypes = true
+exclude = [".cache"]
+
+[tool.ruff]
+# https://beta.ruff.rs/docs/configuration/
+select = ['E', 'W', 'F', 'I', 'B', 'C4', 'ARG', 'SIM']
+ignore = ['W291', 'W292', 'W293']
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+FILE: .replit
+----------------------------------------
+run =  ["gunicorn", "--bind", "0.0.0.0:5000", "main:app"]
+entrypoint = "main.py"
+modules = ["python-3.11", "postgresql-16"]
+
+hidden = [".pythonlibs"]
+
+[nix]
+channel = "stable-24_05"
+packages = ["azure-cli", "postgresql", "zlib"]
+
+[deployment]
+run =  ["gunicorn", "--bind", "0.0.0.0:5000", "main:app"]
+deploymentTarget = "cloudrun"
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+
