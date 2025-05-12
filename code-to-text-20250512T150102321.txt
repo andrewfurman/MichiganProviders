@@ -1,0 +1,861 @@
+### FILE TREE (SELECTED)
+
+├─ insert_records
+|  ├─ insert_networks.py (115 lines)
+|  ├─ insert_queue_items.py (1 lines)
+├─ models
+|  ├─ work_queue.py (56 lines)
+|  ├─ provider.py (48 lines)
+|  ├─ __init__.py (28 lines)
+|  ├─ provider_audit.py (24 lines)
+|  ├─ hospital.py (14 lines)
+|  ├─ medical_group.py (14 lines)
+|  ├─ REL_provider_group.py (13 lines)
+|  ├─ auth.py (13 lines)
+|  ├─ REL_group_network.py (12 lines)
+|  ├─ REL_hospital_network.py (12 lines)
+|  ├─ REL_group_hospital.py (11 lines)
+|  └─ network.py (9 lines)
+|  ├─ db.py (1 lines)
+├─ work_queues
+|  └─ templates
+|     ├─ work_queue_item.html (175 lines)
+|     └─ work_queue.html (90 lines)
+|  ├─ work_queue_routes.py (52 lines)
+|  ├─ merge_duplicates.py (3 lines)
+├─ main.py (80 lines)
+
+
+### FILE CONTENTS
+
+FILE: insert_records/insert_networks.py
+----------------------------------------
+# insert_networks.py
+
+# This script will insert networks into the network table and create the codes and names for each network based on the specified list below.
+
+# Category Prefix	Network Code	Network Name
+# HS (Hospital-Specific)	HS-AGCC	Ascension Genesys ConnectedCare Network
+#   HS-HFHSCC	Henry Ford Health System ConnectedCare Network
+#   HS-HBN12	Hospital Blue Networks (Tier 1 & 2)
+#   HS-THN	Trinity Health Network
+#   HS-UMPC	U-M Premier Care (HMO) Network
+# EG (Employer-Group Only)	EG-BCBSMT	BCBSM Traditional Network
+#   EG-BHPN	Blue High Performance Network
+#   EG-BPPL	Blue Preferred / Blue Preferred Plus Network
+#   EG-BPPOSWI	Blue Preferred POS Network (WI)
+#   EG-MEIPPO	Meijer PPO Network
+#   EG-MEIBHPN	Meijer BlueHPN Network
+#   EG-MEIBPPOS	Meijer Blue Preferred POS Network
+# MS (Multi-Segment)	MS-BCBSMPPO	BCBSM PPO TRUST Network
+#   MS-BCNHMO	BCN HMO (Commercial) Network
+#   MS-PCPF	PCP Focus (HMO) Network
+#   MS-BCMDHMO	Blue Cross Metro Detroit HMO Network
+#   MS-BCLHMO	Blue Cross Local HMO Network
+# MA (Medicare Advantage)	MA-BCBSMPPO	BCBSM Medicare Advantage PPO Network (“Medicare Plus Blue”)
+#   MA-BCNAHPOS	BCN Advantage HMO-POS Network
+#   MA-BCNACV	BCN Advantage Community Value Network
+#   MA-BCNAHCC	BCN Advantage HMO ConnectedCare Network
+#   MA-BCNALHMO	BCN Advantage Local HMO Network
+# MD (Medicaid)	MD-BCC	Blue Cross Complete Network
+
+# insert_records/insert_networks.py
+"""
+Insert BCBSM network reference data
+──────────────────────────────────────────────────────────────────────────────
+Run:   python insert_records/insert_networks.py
+
+• Uses the main Flask app’s SQLAlchemy session
+• Adds every network exactly once (idempotent)
+──────────────────────────────────────────────────────────────────────────────
+"""
+
+# insert_records/insert_networks.py
+import os
+import sys
+
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR not in sys.path:          # ensure project root is on the path
+    sys.path.append(ROOT_DIR)
+
+from main import app, db              # ← keeps a single app/db instance
+from models import Network            # ← THIS LINE IS REQUIRED
+
+# ────────────────────────────────────────────────────────────────────────────
+# 1.  Master list of networks (code ➜ name)
+# ────────────────────────────────────────────────────────────────────────────
+NETWORKS = [
+    # Hospital-Specific (HS-)
+    ("HS-AGCC",  "Ascension Genesys ConnectedCare Network"),
+    ("HS-HFHSCC","Henry Ford Health System ConnectedCare Network"),
+    ("HS-HBN12", "Hospital Blue Networks (Tier 1 & 2)"),
+    ("HS-THN",   "Trinity Health Network"),
+    ("HS-UMPC",  "U-M Premier Care (HMO) Network"),
+
+    # Employer-Group Only (EG-)
+    ("EG-BCBSMT",  "BCBSM Traditional Network"),
+    ("EG-BHPN",    "Blue High Performance Network"),
+    ("EG-BPPL",    "Blue Preferred / Blue Preferred Plus Network"),
+    ("EG-BPPOSWI", "Blue Preferred POS Network (WI)"),
+    ("EG-MEIPPO",  "Meijer PPO Network"),
+    ("EG-MEIBHPN", "Meijer BlueHPN Network"),
+    ("EG-MEIBPPOS","Meijer Blue Preferred POS Network"),
+
+    # Multi-Segment (MS-)
+    ("MS-BCBSMPPO","BCBSM PPO TRUST Network"),
+    ("MS-BCNHMO",  "BCN HMO (Commercial) Network"),
+    ("MS-PCPF",    "PCP Focus (HMO) Network"),
+    ("MS-BCMDHMO", "Blue Cross Metro Detroit HMO Network"),
+    ("MS-BCLHMO",  "Blue Cross Local HMO Network"),
+
+    # Medicare Advantage (MA-)
+    ("MA-BCBSMPPO","BCBSM Medicare Advantage PPO Network (“Medicare Plus Blue”)"),
+    ("MA-BCNAHPOS","BCN Advantage HMO-POS Network"),
+    ("MA-BCNACV",  "BCN Advantage Community Value Network"),
+    ("MA-BCNAHCC", "BCN Advantage HMO ConnectedCare Network"),
+    ("MA-BCNALHMO","BCN Advantage Local HMO Network"),
+
+    # Medicaid (MD-)
+    ("MD-BCC",     "Blue Cross Complete Network"),
+]
+
+# ────────────────────────────────────────────────────────────────────────────
+# 2.  Insert networks (idempotent)
+# ────────────────────────────────────────────────────────────────────────────
+def insert_networks() -> None:
+    inserted = 0
+    skipped  = 0
+
+    for code, name in NETWORKS:
+        # Already present?  Skip.
+        if db.session.query(Network).filter_by(code=code).first():
+            skipped += 1
+            continue
+
+        db.session.add(Network(code=code, name=name))
+        inserted += 1
+
+    db.session.commit()
+    print(f"✅  Insert-networks complete — {inserted} added, {skipped} skipped")
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 3.  Entrypoint
+# ────────────────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    with app.app_context():
+        insert_networks()
+
+FILE: insert_records/insert_queue_items.py
+----------------------------------------
+
+
+FILE: models/work_queue.py
+----------------------------------------
+
+from datetime import datetime
+from sqlalchemy.dialects.postgresql import ARRAY
+from .db import db
+
+class WorkQueueItem(db.Model):
+    __tablename__ = "work_queue_items"
+
+    # Core identity
+    queue_id = db.Column(db.Integer, primary_key=True)
+    provider_id = db.Column(db.Integer,
+                          db.ForeignKey("individual_providers.provider_id",
+                                       ondelete="CASCADE"),
+                          nullable=False)
+
+    # Problem description
+    issue_type = db.Column(db.String(40), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+
+    # Structured recommendation
+    action_type = db.Column(db.String(20), nullable=False, 
+                          default="update_field")
+    field_name = db.Column(db.Text)
+    new_value = db.Column(db.Text)
+    duplicate_ids = db.Column(ARRAY(db.Integer))
+
+    # Free-text recommendation
+    recommended_action = db.Column(db.Text)
+
+    # Workflow/assignment
+    status = db.Column(db.String(20), default="open", nullable=False)
+    assigned_user_id = db.Column(db.Integer,
+                                db.ForeignKey("users.id",
+                                             ondelete="SET NULL"))
+    created_by_user_id = db.Column(db.Integer,
+                                  db.ForeignKey("users.id",
+                                              ondelete="SET NULL"))
+    created_at = db.Column(db.DateTime,
+                          nullable=False,
+                          default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime,
+                          nullable=False, 
+                          default=datetime.utcnow,
+                          onupdate=datetime.utcnow)
+    resolved_at = db.Column(db.DateTime)
+
+    # Relationships
+    provider = db.relationship("IndividualProvider")
+    assigned_user = db.relationship("User",
+                                  foreign_keys=[assigned_user_id])
+    created_by_user = db.relationship("User",
+                                    foreign_keys=[created_by_user_id])
+
+    def is_duplicate_merge(self) -> bool:
+        return self.action_type == "merge_duplicates"
+
+
+FILE: models/provider.py
+----------------------------------------
+from .db import db
+
+class IndividualProvider(db.Model):
+    __tablename__ = 'individual_providers'
+
+    provider_id = db.Column(db.Integer, primary_key=True)
+    npi = db.Column(db.Text, nullable=False)
+    first_name = db.Column(db.Text, nullable=False)
+    last_name = db.Column(db.Text, nullable=False)
+    gender = db.Column(db.Text)
+    phone = db.Column(db.Text)
+    provider_type = db.Column(db.Text)
+    accepting_new_patients = db.Column(db.Boolean)
+    specialties = db.Column(db.Text)
+    board_certifications = db.Column(db.Text)
+    languages = db.Column(db.Text)
+    address_line = db.Column(db.Text)
+    city = db.Column(db.Text)
+    state = db.Column(db.Text)
+    zip = db.Column(db.Text)
+    provider_enrollment_form_image = db.Column(db.LargeBinary)  # BYTEA in PostgreSQL
+    provider_enrollment_form_markdown_text = db.Column(db.Text)
+    provider_enrollment_form_json = db.Column(db.JSON)  # JSONB in PostgreSQL
+    provider_facets_tables = db.Column(db.JSON)  # JSONB in PostgreSQL
+    provider_facets_markdown = db.Column(db.Text)
+
+    def to_dict(self):
+        """
+        Convert IndividualProvider object to dictionary
+        Useful for JSON serialization
+        """
+        return {
+            'provider_id': self.provider_id,
+            'npi': self.npi,
+            'first_name': self.first_name,
+            'last_name': self.last_name,
+            'gender': self.gender,
+            'phone': self.phone,
+            'provider_type': self.provider_type,
+            'accepting_new_patients': self.accepting_new_patients,
+            'specialties': self.specialties,
+            'board_certifications': self.board_certifications,
+            'languages': self.languages,
+            'address_line': self.address_line,
+            'city': self.city,
+            'state': self.state,
+            'zip': self.zip
+        }
+
+FILE: models/__init__.py
+----------------------------------------
+
+from .db import db
+from .auth import User
+from .provider import IndividualProvider
+from .provider_audit import ProviderAudit
+from .work_queue import WorkQueueItem
+from .medical_group import MedicalGroup
+from .hospital import Hospital 
+from .network import Network
+from .REL_provider_group import ProviderGroup
+from .REL_group_hospital import GroupHospital
+from .REL_hospital_network import HospitalNetwork
+from .REL_group_network import GroupNetwork
+
+__all__ = [
+    'db',
+    'User',
+    'IndividualProvider',
+    'ProviderAudit',
+    'MedicalGroup',
+    'Hospital',
+    'Network',
+    'ProviderGroup',
+    'GroupHospital', 
+    'HospitalNetwork',
+    'GroupNetwork'
+]
+
+
+FILE: models/provider_audit.py
+----------------------------------------
+
+from .db import db
+from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
+
+class ProviderAudit(db.Model):
+    """Audit log for provider changes"""
+    __tablename__ = 'individual_provider_audit'
+    
+    audit_id = db.Column(db.Integer, primary_key=True)
+    provider_id = db.Column(db.Integer, db.ForeignKey('individual_providers.provider_id', ondelete='CASCADE'))
+    field_updated = db.Column(db.Text, nullable=False)
+    old_value = db.Column(db.Text)
+    new_value = db.Column(db.Text)
+    change_description = db.Column(db.Text)
+    edit_time = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'))
+
+    # Relationships
+    provider = db.relationship('IndividualProvider', backref=db.backref('audits', lazy='dynamic'))
+    user = db.relationship('User', foreign_keys=[user_id])
+
+
+FILE: models/hospital.py
+----------------------------------------
+
+from . import db
+
+class Hospital(db.Model):
+    __tablename__ = 'hospitals'
+    
+    hospital_id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String, nullable=False)
+    ccn = db.Column(db.String)
+    address_line = db.Column(db.String)
+    city = db.Column(db.String)
+    state = db.Column(db.String)
+    zip = db.Column(db.String)
+
+
+FILE: models/medical_group.py
+----------------------------------------
+
+from . import db
+
+class MedicalGroup(db.Model):
+    __tablename__ = 'medical_groups'
+    
+    group_id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String, nullable=False)
+    tax_id = db.Column(db.String)
+    address_line = db.Column(db.String)
+    city = db.Column(db.String)
+    state = db.Column(db.String)
+    zip = db.Column(db.String)
+
+
+FILE: models/REL_provider_group.py
+----------------------------------------
+
+from . import db
+
+class ProviderGroup(db.Model):
+    __tablename__ = 'individual_provider_medical_group'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    provider_id = db.Column(db.Integer, db.ForeignKey('individual_providers.provider_id'))
+    group_id = db.Column(db.Integer, db.ForeignKey('medical_groups.group_id'))
+    start_date = db.Column(db.Date)
+    end_date = db.Column(db.Date)
+    primary_flag = db.Column(db.Boolean)
+
+
+FILE: models/auth.py
+----------------------------------------
+
+from main import db
+from flask_login import UserMixin
+
+class User(db.Model, UserMixin):
+    __tablename__ = 'users'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(255), unique=True, nullable=False)
+    first_name = db.Column(db.String(120))
+    last_name = db.Column(db.String(120))
+    role = db.Column(db.String(50))
+
+
+FILE: models/REL_group_network.py
+----------------------------------------
+
+from . import db
+
+class GroupNetwork(db.Model):
+    __tablename__ = 'medical_group_network'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    group_id = db.Column(db.Integer, db.ForeignKey('medical_groups.group_id'))
+    network_id = db.Column(db.Integer, db.ForeignKey('networks.network_id'))
+    effective_date = db.Column(db.Date)
+    status = db.Column(db.String)
+
+
+FILE: models/REL_hospital_network.py
+----------------------------------------
+
+from . import db
+
+class HospitalNetwork(db.Model):
+    __tablename__ = 'hospital_network'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    hospital_id = db.Column(db.Integer, db.ForeignKey('hospitals.hospital_id'))
+    network_id = db.Column(db.Integer, db.ForeignKey('networks.network_id'))
+    effective_date = db.Column(db.Date)
+    status = db.Column(db.String)
+
+
+FILE: models/REL_group_hospital.py
+----------------------------------------
+
+from . import db
+
+class GroupHospital(db.Model):
+    __tablename__ = 'medical_group_hospital'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    group_id = db.Column(db.Integer, db.ForeignKey('medical_groups.group_id'))
+    hospital_id = db.Column(db.Integer, db.ForeignKey('hospitals.hospital_id'))
+    privilege_type = db.Column(db.String)
+
+
+FILE: models/network.py
+----------------------------------------
+# Models/network.py
+from . import db
+
+class Network(db.Model):
+    __tablename__ = 'networks'
+    
+    network_id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String, nullable=False)
+    name = db.Column(db.String, nullable=False)
+
+FILE: models/db.py
+----------------------------------------
+from main import db        # now no second instance!
+
+FILE: work_queues/templates/work_queue_item.html
+----------------------------------------
+{% extends "header.html" %}
+
+{% block content %}
+<div class="py-8 px-5 max-w-7xl mx-auto">
+  <nav class="mb-6">
+    <a href="{{ url_for('work_queue.work_queue') }}" class="text-blue-600 hover:text-blue-800">← Back to Work Queue</a>
+  </nav>
+
+  <div class="bg-white shadow rounded-lg p-6">
+    <!-- Header with Status -->
+    <div class="border-b pb-4 mb-6">
+      <div class="flex justify-between items-start">
+        <div>
+          <h1 class="text-2xl font-bold mb-2">Work Item #{{ item.queue_id }}</h1>
+          <p class="text-gray-600">Created {{ item.created_at.strftime('%Y-%m-%d %H:%M UTC') }}</p>
+        </div>
+
+        <!-- Work Queue Status Box -->
+        <div class="flex items-center space-x-4">
+          <form id="statusForm" method="POST" action="{{ url_for('work_queue.update_work_queue_item', queue_id=item.queue_id) }}" class="flex items-center space-x-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Status</label>
+              <select name="status" class="mt-1 block w-40 rounded-md border-gray-300 shadow-sm">
+                <option value="open" {% if item.status == 'open' %}selected{% endif %}>Open</option>
+                <option value="in_progress" {% if item.status == 'in_progress' %}selected{% endif %}>In Progress</option>
+                <option value="resolved" {% if item.status == 'resolved' %}selected{% endif %}>Resolved</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Assigned To</label>
+              <div class="mt-1 text-sm">
+                {{ item.assigned_user.email if item.assigned_user else '— Unassigned —' }}
+              </div>
+            </div>
+            <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 mt-5">💾 Save</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <!-- Work Item Details -->
+      <div>
+        <h2 class="text-lg font-semibold mb-4">Issue Details</h2>
+        <form method="POST" action="{{ url_for('work_queue.update_work_queue_item', queue_id=item.queue_id) }}" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Issue Type</label>
+            <input type="text" name="issue_type" value="{{ item.issue_type }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Description</label>
+            <textarea name="description" rows="3" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">{{ item.description }}</textarea>
+          </div>
+
+          <!-- Recommended Action Section -->
+          <div class="space-y-4">
+            <h3 class="text-lg font-medium text-gray-900">Recommended Action</h3>
+
+            <div class="bg-gray-50 p-4 rounded-lg">
+              <div class="mb-4">
+                <label class="text-sm font-medium text-gray-700">Action Type</label>
+                <input type="text" name="action_type" value="{{ item.action_type }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+              </div>
+
+              {% if item.action_type == 'update_field' and item.field_name %}
+              <div class="mb-4">
+                <label class="text-sm font-medium text-gray-700">Field to Update</label>
+                <input type="text" name="field_name" value="{{ item.field_name }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+
+                <div class="mt-2">
+                  <label class="text-sm font-medium text-gray-700">New Value</label>
+                  <input type="text" name="new_value" value="{{ item.new_value }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+                </div>
+              </div>
+              {% endif %}
+
+              {% if item.action_type == 'merge_duplicates' and item.duplicate_ids %}
+              <div class="mb-4">
+                <label class="text-sm font-medium text-gray-700">Duplicate Provider IDs</label>
+                <div class="mt-1">
+                  {% for id in item.duplicate_ids %}
+                    <a href="{{ url_for('providers.provider_detail', provider_id=id) }}" 
+                       class="inline-block bg-blue-100 text-blue-700 px-2 py-1 rounded mr-2 mb-2 text-sm hover:bg-blue-200">
+                      #{{ id }}
+                    </a>
+                  {% endfor %}
+                </div>
+              </div>
+              {% endif %}
+
+              <div>
+                <label class="block text-sm font-medium text-gray-700">Additional Notes</label>
+                <textarea name="recommended_action" rows="3" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">{{ item.recommended_action or '' }}</textarea>
+              </div>
+            </div>
+          </div>
+
+          <div class="pt-4">
+            <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+              Update Work Item Details
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Provider Information -->
+      <div>
+        <h2 class="text-lg font-semibold mb-4">Provider Information</h2>
+        <div class="bg-gray-50 p-6 rounded-lg">
+          <div class="space-y-4">
+            <!-- Provider Name and Type -->
+            <div>
+              <h3 class="text-xl font-medium text-gray-900">
+                <a href="{{ url_for('providers.provider_detail', provider_id=provider.provider_id) }}" 
+                   class="text-blue-600 hover:text-blue-800 hover:underline">
+                  {{ provider.first_name }} {{ provider.last_name }}
+                </a>
+              </h3>
+              <p class="text-gray-600">{{ provider.provider_type or '—' }}</p>
+            </div>
+
+            <!-- Core Information -->
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="text-sm font-medium text-gray-600">NPI</label>
+                <p class="mt-1">{{ provider.npi or '—' }}</p>
+              </div>
+              <div>
+                <label class="text-sm font-medium text-gray-600">Gender</label>
+                <p class="mt-1">{{ provider.gender or '—' }}</p>
+              </div>
+            </div>
+
+            <!-- Contact Information -->
+            <div>
+              <label class="text-sm font-medium text-gray-600">Phone</label>
+              <p class="mt-1">{{ provider.phone or '—' }}</p>
+            </div>
+            <div>
+              <label class="text-sm font-medium text-gray-600">Address</label>
+              <p class="mt-1">
+                {% if provider.address_line %}
+                {{ provider.address_line }}<br>
+                {{ provider.city }}, {{ provider.state }} {{ provider.zip }}
+                {% else %}
+                —
+                {% endif %}
+              </p>
+            </div>
+
+            <!-- Professional Details -->
+            <div>
+              <label class="text-sm font-medium text-gray-600">Specialties</label>
+              <p class="mt-1">{{ provider.specialties or '—' }}</p>
+            </div>
+            <div>
+              <label class="text-sm font-medium text-gray-600">Board Certifications</label>
+              <p class="mt-1">{{ provider.board_certifications or '—' }}</p>
+            </div>
+            <div>
+              <label class="text-sm font-medium text-gray-600">Languages</label>
+              <p class="mt-1">{{ provider.languages or '—' }}</p>
+            </div>
+            <div>
+              <label class="text-sm font-medium text-gray-600">Accepting New Patients</label>
+              <p class="mt-1">{{ 'Yes' if provider.accepting_new_patients else 'No' }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+FILE: work_queues/templates/work_queue.html
+----------------------------------------
+
+{% extends "header.html" %}
+
+{% block content %}
+<div class="py-8 px-5">
+  <div class="flex justify-between items-center mb-6">
+    <h2 class="text-2xl font-bold">Work Queue</h2>
+    <div class="flex space-x-2">
+      <select id="statusFilter" class="border rounded px-3 py-1">
+        <option value="">All Statuses</option>
+        <option value="open">Open</option>
+        <option value="in_progress">In Progress</option>
+        <option value="resolved">Resolved</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="bg-white shadow rounded-lg overflow-hidden">
+    <table class="min-w-full table-auto">
+      <thead class="bg-gray-50">
+        <tr class="text-xs font-medium text-gray-500 uppercase tracking-wider">
+          <th class="px-6 py-3 text-left">Provider</th>
+          <th class="px-6 py-3 text-left">Issue Type</th>
+          <th class="px-6 py-3 text-left">Description</th>
+          <th class="px-6 py-3 text-left">Status</th>
+          <th class="px-6 py-3 text-left">Assigned To</th>
+          <th class="px-6 py-3 text-left">Last Updated</th>
+        </tr>
+      </thead>
+      <tbody class="bg-white divide-y divide-gray-200">
+        {% for item in items %}
+        <tr class="hover:bg-gray-50">
+          <td class="px-6 py-4">
+            <a href="{{ url_for('work_queue.work_queue_item', queue_id=item.queue_id) }}" 
+               class="text-blue-600 hover:text-blue-800 hover:underline">
+              {{ item.provider.first_name }} {{ item.provider.last_name }}
+            </a>
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap">
+            <span class="text-sm">{{ item.issue_type.replace('_', ' ').title() }}</span>
+          </td>
+          <td class="px-6 py-4">
+            <span class="text-sm text-gray-900">{{ item.description[:100] }}{% if item.description|length > 100 %}...{% endif %}</span>
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap">
+            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full
+              {% if item.status == 'open' %}bg-red-100 text-red-800
+              {% elif item.status == 'in_progress' %}bg-yellow-100 text-yellow-800
+              {% else %}bg-green-100 text-green-800{% endif %}">
+              {{ item.status.replace('_', ' ').title() }}
+            </span>
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+            {{ item.assigned_user.email if item.assigned_user else '—' }}
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+            {{ item.updated_at.strftime('%Y-%m-%d %H:%M') }}
+          </td>
+        </tr>
+        {% endfor %}
+        {% if not items %}
+        <tr>
+          <td colspan="6" class="px-6 py-4 text-center text-gray-500">
+            No work queue items found
+          </td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+document.getElementById('statusFilter').addEventListener('change', function(e) {
+  const status = e.target.value;
+  const rows = document.querySelectorAll('tbody tr');
+  
+  rows.forEach(row => {
+    const statusCell = row.querySelector('td:nth-child(4)');
+    if (!status || !statusCell) {
+      row.style.display = '';
+      return;
+    }
+    const statusText = statusCell.textContent.trim().toLowerCase();
+    row.style.display = statusText.includes(status) ? '' : 'none';
+  });
+});
+</script>
+{% endblock %}
+
+
+FILE: work_queues/work_queue_routes.py
+----------------------------------------
+
+from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
+from flask_login import login_required, current_user
+from main import db
+from models import WorkQueueItem, IndividualProvider, User
+
+wq_bp = Blueprint("work_queue", __name__,
+                  template_folder="templates",
+                  static_folder="static")
+
+@wq_bp.route("/work_queue")
+def work_queue():
+    items = WorkQueueItem.query.order_by(
+        WorkQueueItem.status.desc(),  # open first
+        WorkQueueItem.updated_at.desc()
+    ).all()
+    return render_template("work_queue.html", items=items)
+
+@wq_bp.route("/work_queue/<int:queue_id>")
+def work_queue_item(queue_id):
+    item = WorkQueueItem.query.get_or_404(queue_id)
+    provider = item.provider
+    users = User.query.order_by(User.email).all()
+    return render_template("work_queue_item.html",
+                         item=item, provider=provider, users=users)
+
+@wq_bp.route("/work_queue/<int:queue_id>/update", methods=['POST'])
+def update_work_queue_item(queue_id):
+    item = WorkQueueItem.query.get_or_404(queue_id)
+
+    # Update editable fields
+    item.recommended_action = request.form.get("recommended_action", "").strip()
+    item.status = request.form.get("status", item.status)
+    item.assigned_user_id = request.form.get("assigned_user_id") or None
+
+    if item.status == "resolved" and not item.resolved_at:
+        from datetime import datetime
+        item.resolved_at = datetime.utcnow()
+
+    db.session.commit()
+    flash("Work queue item updated", "success")
+    return redirect(url_for("work_queue.work_queue_item", queue_id=queue_id))
+
+@wq_bp.route("/work_queue/<int:queue_id>/assign_to_me", methods=['POST'])
+def assign_to_me(queue_id):
+    item = WorkQueueItem.query.get_or_404(queue_id)
+    item.assigned_user_id = current_user.id
+    item.status = "in_progress"
+    db.session.commit()
+    flash("You are now assigned", "success")
+    return redirect(url_for("work_queue.work_queue_item", queue_id=queue_id))
+
+
+FILE: work_queues/merge_duplicates.py
+----------------------------------------
+# This function will be called to merge two providers flagged as possible duplicates on a work queue item record.  It will take the work queue item ID as a parameter, then pick the first record as the primary record.
+
+# The other records flagged as duplicates, first we will move all of the REL_provider_group records to the primary record, then we will move all of the REL_provider_network records to the primary record, then we will delete the duplicate records.
+
+FILE: main.py
+----------------------------------------
+from flask import Flask, redirect, url_for
+from flask_sqlalchemy import SQLAlchemy
+from flask_mail import Mail
+from flask_login import LoginManager
+from itsdangerous import URLSafeTimedSerializer
+import os
+
+# Initialize extensions
+db = SQLAlchemy()
+mail = Mail()
+login_mgr = LoginManager()
+
+app = Flask(__name__)
+
+# ────────────────────────────────────────────────────────────────
+# Core configuration
+# ────────────────────────────────────────────────────────────────
+# Database
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ["DATABASE_URL"]
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    'pool_pre_ping': True,
+    'pool_recycle': 300,  # Recycle connections every 5 minutes
+    'pool_timeout': 30,   # Connection timeout of 30 seconds
+    'pool_size': 10       # Maximum pool size
+}
+
+# Secrets ─── raise early if they're missing
+try:
+    app.config["FLASK_SECRET_KEY"] = os.environ["FLASK_SECRET_KEY"]
+    app.config["SECURITY_TOKEN_SALT"] = os.environ["SECURITY_TOKEN_SALT"]
+except KeyError as missing:
+    raise ValueError(f"Required environment variable {missing} is not set")
+
+# `app.secret_key` writes to app.config["SECRET_KEY"]; keep both for clarity
+app.secret_key = app.config["FLASK_SECRET_KEY"]
+
+# Mail (optional—but convenient to load here)
+app.config["MAIL_SERVER"] = os.environ.get("MAIL_SERVER", "smtp.gmail.com")
+app.config["MAIL_PORT"] = int(os.environ.get("MAIL_PORT", "587"))
+app.config["MAIL_USE_TLS"] = os.environ.get("MAIL_USE_TLS", "true").lower() == "true"
+app.config["MAIL_USERNAME"] = os.environ.get("MAIL_USERNAME")
+app.config["MAIL_PASSWORD"] = os.environ.get("MAIL_PASSWORD")
+app.config["MAIL_DEFAULT_SENDER"] = os.environ.get(
+    "EMAILS_SENT_FROM", app.config["MAIL_USERNAME"]
+)
+
+# Initialize extensions with app
+db.init_app(app)
+mail.init_app(app)
+login_mgr.init_app(app)
+
+# Create URL safe serializer
+ts = URLSafeTimedSerializer(
+    secret_key=app.config["FLASK_SECRET_KEY"],
+    salt=app.config["SECURITY_TOKEN_SALT"]
+)
+
+# ────────────────────────────────────────────────────────────────
+# Blueprints & routes
+# ────────────────────────────────────────────────────────────────
+from providers.providers_routes import providers_bp
+from auth import bp as auth_bp
+from work_queues.work_queue_routes import wq_bp
+from upload_provider.upload_provider_routes import upload_provider_bp
+
+app.register_blueprint(auth_bp, url_prefix="/auth")
+app.register_blueprint(providers_bp)
+app.register_blueprint(wq_bp)
+app.register_blueprint(upload_provider_bp)
+
+@app.route("/")
+def index():
+    return redirect(url_for("upload_provider.upload"))
+
+# ────────────────────────────────────────────────────────────────
+# Entrypoint
+# ────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
+

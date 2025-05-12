@@ -1,7 +1,8 @@
 ### FILE TREE (SELECTED)
 
 ├─ insert_records
-|  ├─ insert_networks.py (28 lines)
+|  └─ insert_networks.py (115 lines)
+|  ├─ insert_hospitals.py (3 lines)
 ├─ models
 |  ├─ work_queue.py (56 lines)
 |  ├─ provider.py (48 lines)
@@ -16,10 +17,7 @@
 |  ├─ REL_group_hospital.py (11 lines)
 |  └─ network.py (9 lines)
 |  ├─ db.py (1 lines)
-├─ providers
-|  ├─ providers_routes.py (92 lines)
 ├─ main.py (80 lines)
-├─ create_tables.py (65 lines)
 ├─ pyproject.toml (32 lines)
 ├─ .replit (18 lines)
 
@@ -56,6 +54,99 @@ FILE: insert_records/insert_networks.py
 #   MA-BCNAHCC	BCN Advantage HMO ConnectedCare Network
 #   MA-BCNALHMO	BCN Advantage Local HMO Network
 # MD (Medicaid)	MD-BCC	Blue Cross Complete Network
+
+# insert_records/insert_networks.py
+"""
+Insert BCBSM network reference data
+──────────────────────────────────────────────────────────────────────────────
+Run:   python insert_records/insert_networks.py
+
+• Uses the main Flask app’s SQLAlchemy session
+• Adds every network exactly once (idempotent)
+──────────────────────────────────────────────────────────────────────────────
+"""
+
+# insert_records/insert_networks.py
+import os
+import sys
+
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR not in sys.path:          # ensure project root is on the path
+    sys.path.append(ROOT_DIR)
+
+from main import app, db              # ← keeps a single app/db instance
+from models import Network            # ← THIS LINE IS REQUIRED
+
+# ────────────────────────────────────────────────────────────────────────────
+# 1.  Master list of networks (code ➜ name)
+# ────────────────────────────────────────────────────────────────────────────
+NETWORKS = [
+    # Hospital-Specific (HS-)
+    ("HS-AGCC",  "Ascension Genesys ConnectedCare Network"),
+    ("HS-HFHSCC","Henry Ford Health System ConnectedCare Network"),
+    ("HS-HBN12", "Hospital Blue Networks (Tier 1 & 2)"),
+    ("HS-THN",   "Trinity Health Network"),
+    ("HS-UMPC",  "U-M Premier Care (HMO) Network"),
+
+    # Employer-Group Only (EG-)
+    ("EG-BCBSMT",  "BCBSM Traditional Network"),
+    ("EG-BHPN",    "Blue High Performance Network"),
+    ("EG-BPPL",    "Blue Preferred / Blue Preferred Plus Network"),
+    ("EG-BPPOSWI", "Blue Preferred POS Network (WI)"),
+    ("EG-MEIPPO",  "Meijer PPO Network"),
+    ("EG-MEIBHPN", "Meijer BlueHPN Network"),
+    ("EG-MEIBPPOS","Meijer Blue Preferred POS Network"),
+
+    # Multi-Segment (MS-)
+    ("MS-BCBSMPPO","BCBSM PPO TRUST Network"),
+    ("MS-BCNHMO",  "BCN HMO (Commercial) Network"),
+    ("MS-PCPF",    "PCP Focus (HMO) Network"),
+    ("MS-BCMDHMO", "Blue Cross Metro Detroit HMO Network"),
+    ("MS-BCLHMO",  "Blue Cross Local HMO Network"),
+
+    # Medicare Advantage (MA-)
+    ("MA-BCBSMPPO","BCBSM Medicare Advantage PPO Network (“Medicare Plus Blue”)"),
+    ("MA-BCNAHPOS","BCN Advantage HMO-POS Network"),
+    ("MA-BCNACV",  "BCN Advantage Community Value Network"),
+    ("MA-BCNAHCC", "BCN Advantage HMO ConnectedCare Network"),
+    ("MA-BCNALHMO","BCN Advantage Local HMO Network"),
+
+    # Medicaid (MD-)
+    ("MD-BCC",     "Blue Cross Complete Network"),
+]
+
+# ────────────────────────────────────────────────────────────────────────────
+# 2.  Insert networks (idempotent)
+# ────────────────────────────────────────────────────────────────────────────
+def insert_networks() -> None:
+    inserted = 0
+    skipped  = 0
+
+    for code, name in NETWORKS:
+        # Already present?  Skip.
+        if db.session.query(Network).filter_by(code=code).first():
+            skipped += 1
+            continue
+
+        db.session.add(Network(code=code, name=name))
+        inserted += 1
+
+    db.session.commit()
+    print(f"✅  Insert-networks complete — {inserted} added, {skipped} skipped")
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 3.  Entrypoint
+# ────────────────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    with app.app_context():
+        insert_networks()
+
+FILE: insert_records/insert_hospitals.py
+----------------------------------------
+# insert_records/insert_hospitals.py
+
+#this file will insert hospitals into the hospitals table with fields for Name, CCN, Address, City, State, Zip, and Phone Number
 
 FILE: models/work_queue.py
 ----------------------------------------
@@ -351,101 +442,6 @@ FILE: models/db.py
 ----------------------------------------
 from main import db        # now no second instance!
 
-FILE: providers/providers_routes.py
-----------------------------------------
-from flask import Blueprint, render_template, abort, request, redirect, url_for, flash, current_app
-from main import db
-from models import IndividualProvider, MedicalGroup, Hospital, Network, ProviderGroup, HospitalNetwork
-
-
-providers_bp = Blueprint('providers', __name__, 
-                        template_folder='templates',
-                        static_folder='static',
-                        static_url_path='/providers/static')
-
-@providers_bp.route('/individual_providers/<int:provider_id>')
-def provider_detail(provider_id):
-    provider = db.session.query(IndividualProvider).get(provider_id)
-    if provider is None:
-        abort(404)
-
-    medical_groups = db.session.query(MedicalGroup)\
-        .join(ProviderGroup, ProviderGroup.group_id == MedicalGroup.group_id)\
-        .filter(ProviderGroup.provider_id == provider_id)\
-        .all()
-
-    return render_template('individual_provider_detail.html', provider=provider, medical_groups=medical_groups)
-
-@providers_bp.route('/individual_providers/<int:provider_id>/update', methods=['POST'])
-def update_provider(provider_id):
-    from providers.individual_provider_update import update_individual_provider
-    return update_individual_provider(provider_id)
-
-@providers_bp.route('/medical_groups')
-def medical_groups():
-    groups = db.session.query(MedicalGroup).order_by(MedicalGroup.group_id).all()
-    return render_template('medical_groups.html', medical_groups=groups)
-
-@providers_bp.route('/individual_providers')
-def providers():
-    providers = db.session.query(IndividualProvider).all()
-    return render_template('individual_providers.html', providers=providers)
-
-@providers_bp.route('/individual_providers/<int:provider_id>/delete', methods=['POST'])
-def delete_provider(provider_id):
-    provider = db.session.query(IndividualProvider).get(provider_id)
-    if provider is None:
-        abort(404)
-
-    # First delete all provider group relationships
-    db.session.query(ProviderGroup).filter(ProviderGroup.provider_id == provider_id).delete()
-    
-    # Then delete the provider
-    db.session.delete(provider)
-    db.session.commit()
-    flash('Provider deleted successfully', 'success')
-    return redirect(url_for('providers.providers'))
-
-@providers_bp.route('/networks')
-def networks():
-    networks = db.session.query(Network).order_by(Network.network_id).all()
-    return render_template('networks.html', networks=networks)
-
-@providers_bp.route('/hospitals')
-def hospitals():
-    hospitals = db.session.query(Hospital).order_by(Hospital.hospital_id).all()
-    return render_template('hospitals.html', hospitals=hospitals)
-
-@providers_bp.route('/hospitals/<int:hospital_id>')
-def hospital_detail(hospital_id):
-    hospital = db.session.query(Hospital).get(hospital_id)
-    if hospital is None:
-        abort(404)
-    
-    networks = db.session.query(Network, HospitalNetwork)\
-        .join(HospitalNetwork, Network.network_id == HospitalNetwork.network_id)\
-        .filter(HospitalNetwork.hospital_id == hospital_id)\
-        .all()
-        
-    return render_template('hospital_detail.html', hospital=hospital, networks=networks)
-
-@providers_bp.route('/hospitals/<int:hospital_id>/update', methods=['POST'])
-def update_hospital(hospital_id):
-    hospital = db.session.query(Hospital).get(hospital_id)
-    if hospital is None:
-        abort(404)
-        
-    hospital.name = request.form.get('name')
-    hospital.ccn = request.form.get('ccn')
-    hospital.address_line = request.form.get('address_line')
-    hospital.city = request.form.get('city')
-    hospital.state = request.form.get('state')
-    hospital.zip = request.form.get('zip')
-    
-    db.session.commit()
-    flash('Hospital updated successfully', 'success')
-    return redirect(url_for('providers.hospital_detail', hospital_id=hospital_id))
-
 FILE: main.py
 ----------------------------------------
 from flask import Flask, redirect, url_for
@@ -528,74 +524,6 @@ def index():
 # ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
-
-FILE: create_tables.py
-----------------------------------------
-"""
-create_tables.py
-─────────────────────────────────────────────────────────────────────────────
-• Verifies the app can connect to the PostgreSQL database
-• Imports every model so SQLAlchemy’s metadata is fully populated
-• Creates (or upgrades) all tables in the database
-Run:  python create_tables.py
-─────────────────────────────────────────────────────────────────────────────
-"""
-
-import logging
-from sqlalchemy import text
-from main import app, db           # re-use the Flask app & SQLAlchemy instance
-
-# ────────────────────────────────────────────────────────────────────────────
-# 1.  Verify DB connectivity
-# ────────────────────────────────────────────────────────────────────────────
-def verify_db_connection() -> None:
-    """
-    Executes a simple SELECT 1 to confirm that the DATABASE_URL in main.py
-    is valid and the server is reachable.
-    """
-    with app.app_context():
-        try:
-            db.session.execute(text("SELECT 1"))
-            print("✅  Database connection established")
-        except Exception as exc:        # pylint: disable=broad-except
-            print("❌  Failed to connect to database:", exc)
-            raise                      # Surface the error so CI/CD fails
-
-
-# ────────────────────────────────────────────────────────────────────────────
-# 2.  Import every model so they’re registered with SQLAlchemy
-#     (models/__init__.py already imports each sub-module)
-# ────────────────────────────────────────────────────────────────────────────
-def import_all_models() -> None:
-    """
-    Importing `models` triggers its __init__.py, which in turn imports every
-    model module (provider, hospital, etc.).  That ensures all tables are
-    present in SQLAlchemy’s metadata before we call `create_all()`.
-    """
-    import models  # noqa: F401  pylint: disable=import-outside-toplevel,unused-import
-
-
-# ────────────────────────────────────────────────────────────────────────────
-# 3.  Create every table defined in metadata
-# ────────────────────────────────────────────────────────────────────────────
-def create_all_tables() -> None:
-    """Creates tables if they don’t exist; no-ops if they’re already present."""
-    with app.app_context():
-        db.create_all()
-        print("🗄️  All tables created (or already existed)")
-
-
-# ────────────────────────────────────────────────────────────────────────────
-# Entrypoint
-# ────────────────────────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s"
-    )
-
-    verify_db_connection()
-    import_all_models()
-    create_all_tables()
 
 FILE: pyproject.toml
 ----------------------------------------
